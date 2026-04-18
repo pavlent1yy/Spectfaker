@@ -21,6 +21,14 @@ public class DocxService {
 
     private final Random random = new Random();
 
+    // Realistic handwriting variation ranges
+    private static final double BASE_FONT_SIZE = 19.0;
+    private static final double FONT_SIZE_VARIANCE = 0.8; // ±0.8pt per character
+    private static final int SPACING_MIN = -35;           // twips/20, tighter
+    private static final int SPACING_MAX = -18;           // twips/20, looser
+    private static final double LINE_SPACING_MIN = 0.82;
+    private static final double LINE_SPACING_MAX = 0.95;
+
     public void processDocxFile(MultipartFile file, HttpServletResponse response) throws IOException {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("Файл не выбран");
@@ -30,6 +38,7 @@ public class DocxService {
             XWPFDocument document = new XWPFDocument(inputStream);
             setupDocumentDefaults(document);
 
+            // Extract text
             StringBuilder fullTextBuilder = new StringBuilder();
             for (XWPFParagraph paragraph : document.getParagraphs()) {
                 for (XWPFRun run : paragraph.getRuns()) {
@@ -42,8 +51,9 @@ public class DocxService {
             }
 
             String fullText = fullTextBuilder.toString().trim();
-            fullText = replaceUnsupportedCharacters(fullText); // заменяем тире на дефисы
+            fullText = replaceUnsupportedCharacters(fullText);
 
+            // Remove existing paragraphs
             int paragraphCount = document.getParagraphs().size();
             for (int i = paragraphCount - 1; i >= 0; i--) {
                 document.removeBodyElement(i);
@@ -51,13 +61,22 @@ public class DocxService {
 
             String[] lines = fullText.split("\\R");
             for (String line : lines) {
-                // Добавляем случайные пробелы в начало строки (от 1 до 4)
+                if (line.isBlank()) {
+                    // Preserve empty lines as short blank paragraphs
+                    XWPFParagraph blank = document.createParagraph();
+                    blank.setSpacingAfter(0);
+                    blank.setSpacingBefore(0);
+                    continue;
+                }
+
                 String lineWithLeadingSpaces = addRandomLeadingSpaces(line);
 
-                // Создаем мини-параграф для каждой строки
                 XWPFParagraph newParagraph = document.createParagraph();
-                newParagraph.setSpacingBetween(0.85 + (0.05 * random.nextDouble()));
-                newParagraph.setSpacingBefore(0);
+                // Single consistent spacing setup — no double-assignment
+                double lineSpacing = LINE_SPACING_MIN
+                        + (LINE_SPACING_MAX - LINE_SPACING_MIN) * random.nextDouble();
+                newParagraph.setSpacingBetween(lineSpacing, LineSpacingRule.AT_LEAST);
+                newParagraph.setSpacingBefore(2);
                 newParagraph.setSpacingAfter(0);
 
                 addLineToParagraph(newParagraph, lineWithLeadingSpaces);
@@ -68,32 +87,34 @@ public class DocxService {
         }
     }
 
-    // Заменяем тире на дефисы
     private String replaceUnsupportedCharacters(String text) {
-        return text.replace("–", "-").replace("—", "-").replace("‒", "-").replace("−", "-");
+        return text
+                .replace("–", "-")
+                .replace("—", "-")
+                .replace("‒", "-")
+                .replace("−", "-");
     }
 
-    // Пробелы в начале строки: от 1 до 4
+    // 0–2 spaces: subtle indent, not a tab stop every line
     private String addRandomLeadingSpaces(String text) {
-        int spacesCount = random.nextInt(4) + 1; // 1 - 4 пробела
+        int spacesCount = random.nextInt(3); // 0, 1, or 2
         return " ".repeat(spacesCount) + text;
     }
 
-    // Добавляем слова с пробелами (1-4 пробела между словами)
     private void addLineToParagraph(XWPFParagraph paragraph, String line) {
         String[] words = line.split("\\s+");
-        paragraph.setSpacingBefore(2);
-        paragraph.setSpacingBetween(0.65, LineSpacingRule.AT_LEAST);
         for (int i = 0; i < words.length; i++) {
             String word = words[i];
             for (char c : word.toCharArray()) {
                 editSymbol(paragraph, c);
             }
 
-            // Добавляем пробелы после слова (от 2 до 4)
-            int spaceCount = random.nextInt(4) + 2; // 1 - 4 пробела
-            for (int j = 0; j < spaceCount; j++) {
-                editSymbol(paragraph, ' ');
+            if (i < words.length - 1) {
+                // 1–2 spaces between words — enough to look hand-spaced, not typed
+                int spaceCount = random.nextInt(2) + 1;
+                for (int j = 0; j < spaceCount; j++) {
+                    editSymbol(paragraph, ' ');
+                }
             }
         }
     }
@@ -102,7 +123,10 @@ public class DocxService {
         XWPFRun newSymbol = paragraph.createRun();
         newSymbol.setText(String.valueOf(c), 0);
         newSymbol.setCharacterSpacing(getRandomCharacterSpacing());
-        newSymbol.setFontSize(19);
+
+        // Slight font-size jitter — real handwriting is never perfectly uniform
+        double sizeDelta = (random.nextDouble() * 2 - 1) * FONT_SIZE_VARIANCE;
+        newSymbol.setFontSize(BASE_FONT_SIZE + sizeDelta);
 
         List<String> rusFontArray = List.of(
                 "PavelFont1 Regular", "PavelFont2 Regular",
@@ -115,28 +139,29 @@ public class DocxService {
                 "PavelFontENG1 Regular", "PavelFontENG2 Regular"
         );
 
-        // Символы, которые встречаются в обоих шрифтах
         String commonSymbols = "!\"'*()[]{},.+-'/0123456789:;<>?@";
 
-        // Выбор шрифта
         if ((c >= 'А' && c <= 'я') || c == 'ё' || c == 'Ё') {
-            // Русские буквы — берем только из русского списка
             newSymbol.setFontFamily(rusFontArray.get(random.nextInt(rusFontArray.size())));
         } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
-            // Английские буквы — берем только из английского списка
             newSymbol.setFontFamily(engFontArray.get(random.nextInt(engFontArray.size())));
         } else if (commonSymbols.indexOf(c) != -1) {
-            // Общие символы — случайно выбираем русский или английский шрифт
-            List<String> combinedFonts = List.of(
-                    rusFontArray.get(random.nextInt(rusFontArray.size())),
-                    engFontArray.get(random.nextInt(engFontArray.size()))
-            );
-            newSymbol.setFontFamily(combinedFonts.get(random.nextInt(combinedFonts.size())));
-            newSymbol.setFontSize(17.5);
+            // Common symbols: pick from either pool randomly
+            boolean useRus = random.nextBoolean();
+            String font = useRus
+                    ? rusFontArray.get(random.nextInt(rusFontArray.size()))
+                    : engFontArray.get(random.nextInt(engFontArray.size()));
+            newSymbol.setFontFamily(font);
+            newSymbol.setFontSize(17.5 + (random.nextDouble() * 2 - 1) * 0.5);
         } else {
-            // Если это какой-то другой символ, например пробел, то оставляем стандартный шрифт
+            // Spaces, unknown chars
             newSymbol.setFontFamily(engFontArray.get(random.nextInt(engFontArray.size())));
         }
+    }
+
+    private int getRandomCharacterSpacing() {
+        // Real variation in twips/20: tighter on some chars, looser on others
+        return SPACING_MIN + random.nextInt(SPACING_MAX - SPACING_MIN + 1);
     }
 
     private void setupDocumentDefaults(XWPFDocument document) {
@@ -144,23 +169,16 @@ public class DocxService {
                 ? document.getDocument().getBody().getSectPr()
                 : document.getDocument().getBody().addNewSectPr();
 
-        // Размер страницы: 170мм x 203мм
         CTPageSz pageSize = sectPr.isSetPgSz() ? sectPr.getPgSz() : sectPr.addNewPgSz();
-        pageSize.setW(BigInteger.valueOf(smToTWIPs(17)));  // ширина
-        pageSize.setH(BigInteger.valueOf(smToTWIPs(20.3))); // высота
+        pageSize.setW(BigInteger.valueOf(smToTWIPs(17)));
+        pageSize.setH(BigInteger.valueOf(smToTWIPs(20.3)));
         pageSize.setOrient(STPageOrientation.PORTRAIT);
 
-        // Поля документа
         CTPageMar pageMar = sectPr.isSetPgMar() ? sectPr.getPgMar() : sectPr.addNewPgMar();
-        pageMar.setLeft(BigInteger.valueOf(smToTWIPs(2)));    // 2 см слева
-        pageMar.setRight(BigInteger.valueOf(smToTWIPs(2)));   // 2 см справа
-        pageMar.setTop(BigInteger.valueOf(smToTWIPs(0.7)));   // 0.7 см сверху
-        pageMar.setBottom(BigInteger.valueOf(smToTWIPs(0.6)));// 0.6 см снизу
-    }
-    
-
-    private int getRandomCharacterSpacing() {
-        return (int) (-1.4 * 20); // -28 в 1/20 пт
+        pageMar.setLeft(BigInteger.valueOf(smToTWIPs(2)));
+        pageMar.setRight(BigInteger.valueOf(smToTWIPs(2)));
+        pageMar.setTop(BigInteger.valueOf(smToTWIPs(0.7)));
+        pageMar.setBottom(BigInteger.valueOf(smToTWIPs(0.6)));
     }
 
     public int smToTWIPs(double sm) {
