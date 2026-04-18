@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head>
+    <title>Загрузка файла</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+<h1>Загрузите .docx файл</h1>
+<form class="upload-file-form" method="POST" action="/upload" enctype="multipart/form-data">
+
+    <label for="files" class="drop-container" id="dropcontainer">
+        <span class="drop-title">Drop files here</span>
+        or
+        <input type="file" name="file" id="files" accept=".docx" required>
+    </label>
+<!--    <input class="input-file" type="file" name="file" accept=".docx" required> <br>-->
+    <div class="container">
+        <button class="runButton" type="submit">Run!📤 </button>
+    </div>
+</form>
+</body>
+</html>
+
+
