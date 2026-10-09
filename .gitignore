@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local libs ###
+poi-bin-5.2.3/
